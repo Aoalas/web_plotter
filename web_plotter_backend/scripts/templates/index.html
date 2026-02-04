@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Web Plotter v1.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.4.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.0/dist/echarts.min.js"></script>
+    <style>
+
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; color: #ccc; font-family: 'Segoe UI', sans-serif; }
+        #app { display: flex; width: 100%; height: 100%; }
+
+
+        .sidebar { width: 380px; min-width: 380px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; z-index: 20; }
+        .sidebar-header { padding: 12px; background: #333; border-bottom: 1px solid #444; }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .sidebar-content::-webkit-scrollbar { width: 6px; }
+        .sidebar-content::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+        .row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+        input, select {
+            background: #3c3c3c; border: 1px solid #555; color: white;
+            padding: 6px; border-radius: 4px; outline: none;
+            flex: 1; width: 0; min-width: 0;
+        }
+        button { background: #0e639c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+        button:hover { background: #1177bb; }
+        button.red { background: #a51d2d; }
+        button.sm { padding: 4px 10px; font-size: 12px; }
+        button:disabled { background: #555; cursor: not-allowed; opacity: 0.6; }
+
+        .topic-group { margin-bottom: 10px; border: 1px solid #444; border-radius: 4px; overflow: hidden; }
+        .topic-header {
+            background: #2d2d30; padding: 6px 10px; font-size: 13px; font-weight: bold; color: #ddd;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+        }
+        .topic-header:hover { background: #3e3e42; }
+        .topic-body { padding: 5px 0 5px 10px; background: #1e1e1e; }
+
+        .tree-item { cursor: pointer; user-select: none; font-family: 'Consolas', monospace; font-size: 13px; }
+        .item-content { display: flex; align-items: center; padding: 2px 4px; border-radius: 3px; }
+        .item-content:hover { background-color: #2a2d2e; }
+        .selected > .item-content { background-color: #37373d; font-weight: bold; color: #fff; }
+
+        .icon { width: 14px; text-align: center; color: #888; font-size: 10px; }
+        .leaf-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; margin: 0 6px; }
+        .selected > .item-content .leaf-dot { box-shadow: 0 0 6px currentColor; }
+
+        .key-name { color: #9cdcfe; margin-right: 6px; }
+        .val-preview { color: #b5cea8; font-size: 0.9em; margin-left: auto; }
+        .joint-name { color: #ce9178; font-style: italic; margin-left: 6px; font-size: 0.9em; opacity: 0.8; }
+        .tree-children { padding-left: 16px; border-left: 1px solid #333; margin-left: 6px; }
+
+
+        .main { flex: 1; position: relative; display: flex; flex-direction: column; background: #1e1e1e; }
+        #chart { width: 100%; height: 100%; }
+
+
+        .top-toolbar {
+            position: absolute; top: 15px; right: 20px; z-index: 100;
+            display: flex; gap: 8px;
+        }
+        .tool-btn {
+            background: rgba(50, 50, 50, 0.9); border: 1px solid #555; color: #ccc;
+            padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 5px;
+            transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        .tool-btn:hover { background: #444; color: white; border-color: #777; }
+        .tool-btn:active { transform: translateY(1px); }
+
+
+        .legend-bar {
+            position: absolute; bottom: 20px; right: 20px; z-index: 100;
+            background: rgba(30, 30, 30, 0.9); padding: 6px 10px; border-radius: 4px;
+            display: flex; gap: 10px; align-items: center; border: 1px solid #444;
+            max-width: 80%; overflow-x: auto;
+        }
+        .legend-item { display: flex; align-items: center; font-size: 12px; color: #eee; background: #333; padding: 3px 8px; border-radius: 10px; border: 1px solid #555; white-space: nowrap; }
+        .color-box { width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; }
+        .close-btn { margin-left: 8px; cursor: pointer; color: #888; font-weight: bold; }
+        .close-btn:hover { color: #fff; }
+    </style>
+</head>
+<body>
+
+<script type="text/x-template" id="item-template">
+    <div class="tree-item">
+        <div class="item-content" @click="toggle" :class="{ selected: isSelected }">
+            <span v-if="isFolder" class="icon">{{ isOpen ? '▼' : '▶' }}</span>
+            <span v-else class="icon"></span>
+            <div v-if="!isFolder" class="leaf-dot" :style="{ background: isSelected ? color : '#555' }"></div>
+
+            <span class="key-name">{{ label }}</span>
+            <span v-if="jointName" class="joint-name">{{ jointName }}</span>
+            <span v-if="!isFolder" class="val-preview">{{ formatVal(value) }}</span>
+        </div>
+        <div v-show="isOpen" v-if="isFolder" class="tree-children">
+            <tree-item v-for="(val, key) in value" :key="key" :item-key="key" :value="val"
+                       :path="fullPath(key)" :depth="depth + 1" :topic="topic"
+                       :joint-map="jointMap" :selected-paths="selectedPaths"
+                       @select="$emit('select', $event)">
+            </tree-item>
+        </div>
+    </div>
+</script>
+
+<div id="app">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="row">
+                <input v-model="robotUrl" placeholder="IP:Port">
+                <button v-if="!isConnected" @click="connect">连接</button>
+                <button v-else class="red" @click="disconnect">断开</button>
+            </div>
+
+            <div v-if="isConnected">
+                <div class="row">
+                    <select v-model="topicToAdd">
+                        <option value="" disabled>选择要添加的话题...</option>
+                        <option v-for="t in allTopics" :value="t.name">{{ t.name }} ({{ t.type }})</option>
+                    </select>
+                    <button class="sm" @click="addTopic" :disabled="!topicToAdd">＋ 添加</button>
+                </div>
+                <div style="font-size:11px; color:#666; margin-top:5px; border-top:1px solid #444; padding-top:5px;">
+                    Shift+移动查看数值，支持多话题。
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar-content">
+            <div v-if="!isConnected" style="text-align:center; margin-top:50px; color:#666;">请连接ROS后端</div>
+            <div v-else-if="subscribedTopics.length === 0" style="text-align:center; margin-top:50px; color:#666;">
+                请在上方添加话题
+            </div>
+
+            <div v-for="topic in subscribedTopics" :key="topic" class="topic-group">
+                <div class="topic-header" @click="toggleTopic(topic)">
+                    <span>{{ topic }}</span>
+                    <span @click.stop="removeTopic(topic)" title="移除话题" style="color:#aaa; font-weight:bold;">✕</span>
+                </div>
+
+                <div class="topic-body" v-show="!topicCollapsed[topic]">
+                    <div v-if="!topicData[topic]" style="padding:10px; color:#666;">等待数据...</div>
+                    <tree-item v-else
+                               v-for="(val, key) in topicData[topic].msg"
+                               :key="key" :item-key="key" :value="val" :path="key"
+                               :depth="0" :topic="topic"
+                               :joint-map="getJointMap(topic)"
+                               :selected-paths="activePlots"
+                               @select="togglePlot">
+                    </tree-item>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="top-toolbar">
+            <button class="tool-btn" @click="togglePause" :style="{color: isPaused ? '#ffa500' : ''}">
+                {{ isPaused ? '▶ 继续' : '⏸ 暂停' }}
+            </button>
+            <div style="width:1px; height:20px; background:#555; margin:0 5px;"></div>
+            <button class="tool-btn" @click="dispatchChartAction('restore')" title="重置缩放">⟲ 还原</button>
+            <button class="tool-btn" @click="activateBoxZoom" title="鼠标框选放大">🔍 框选</button>
+        </div>
+
+        <div class="legend-bar" v-if="Object.keys(activePlots).length > 0">
+            <div class="legend-item" v-for="(cfg, id) in activePlots" :key="id">
+                <div class="color-box" :style="{background: cfg.color}"></div>
+                <span>{{ cfg.name }}</span>
+                <span class="close-btn" @click="removePlot(id)">×</span>
+            </div>
+            <button @click="clearAll" class="sm" style="margin-left:5px;">清空</button>
+        </div>
+
+        <div id="chart"></div>
+    </div>
+</div>
+
+<script>
+    const COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
+
+    Vue.component('tree-item', {
+        template: '#item-template',
+        props: ['itemKey', 'value', 'path', 'depth', 'jointMap', 'selectedPaths', 'topic'],
+        data() { return { isOpen: false }; },
+        mounted() { if(this.depth === 0) this.isOpen = true; },
+        computed: {
+            isFolder() { return this.value && typeof this.value === 'object'; },
+            label() { return this.itemKey; },
+            jointName() { return this.jointMap[this.path]; },
+            fullId() { return this.topic + '::' + this.path; },
+            isSelected() { return this.selectedPaths.hasOwnProperty(this.fullId); },
+            color() { return this.isSelected ? this.selectedPaths[this.fullId].color : 'transparent'; }
+        },
+        methods: {
+            toggle() { this.isFolder ? (this.isOpen = !this.isOpen) : this.$emit('select', { topic: this.topic, path: this.path }); },
+            fullPath(key) { return this.path + '.' + key; },
+            formatVal(v) {
+                if (typeof v === 'boolean') return v ? 'True' : 'False';
+                if (typeof v === 'number') return v.toFixed(3);
+                return v;
+            }
+        }
+    });
+
+    new Vue({
+        el: '#app',
+        data: {
+            robotUrl: 'http://192.168.100.2:5000',
+            socket: null, isConnected: false, isPaused: false,
+            allTopics: [], topicToAdd: '',
+            subscribedTopics: [], topicData: {}, topicCollapsed: {}, jointMaps: {},
+            activePlots: {}, chart: null, renderTimer: null, isShiftDown: false
+        },
+        mounted() {
+            this.initChart();
+            window.addEventListener('resize', () => this.chart && this.chart.resize());
+            this.renderTimer = setInterval(this.renderLoop, 33);
+            window.addEventListener('keydown', e => { if(e.key === 'Shift') { this.isShiftDown = true; this.updateTooltip(); } });
+            window.addEventListener('keyup', e => { if(e.key === 'Shift') { this.isShiftDown = false; this.updateTooltip(); } });
+        },
+        methods: {
+
+            handleSingleData(payload) {
+                const topic = payload.topic;
+                const msg = payload.msg;
+
+                this.$set(this.topicData, topic, payload);
+
+
+                if (Array.isArray(msg.name)) {
+                    const newMap = {};
+                    ['position', 'velocity', 'effort'].forEach(field => {
+                        if (Array.isArray(msg[field])) {
+                            msg.name.forEach((name, idx) => { newMap[`${field}.${idx}`] = `(${name})`; });
+                        }
+                    });
+                    this.$set(this.jointMaps, topic, newMap);
+                }
+
+
+                const time = payload.timestamp * 1000;
+                for (let id in this.activePlots) {
+                    const [pTopic, pPath] = id.split('::');
+
+                    if (pTopic === topic) {
+                        let val = this.getValueByPath(msg, pPath);
+
+
+                        if (typeof val === 'boolean') {
+                            val = val ? 1 : 0;
+                        }
+
+
+                        if (typeof val === 'number') {
+                            const buffer = this.activePlots[id].data;
+                            if (buffer.length > 0) {
+                                if (time - buffer[buffer.length-1][0] > 500) buffer.push([buffer[buffer.length-1][0]+1, null]);
+                            }
+                            buffer.push([time, val]);
+                            if (buffer.length > 5000) buffer.shift();
+                        }
+                    }
+                }
+            },
+
+
+            connect() {
+                if(this.socket) this.socket.disconnect();
+                this.socket = io(this.robotUrl);
+                this.socket.on('connect', () => { this.isConnected = true; this.fetchTopics(); });
+                this.socket.on('disconnect', () => { this.isConnected = false; });
+                this.socket.on('ros_data_batch', (batch) => batch.forEach(p => this.handleSingleData(p)));
+                this.socket.on('subscribe_ack', (d) => {
+                    if (!this.subscribedTopics.includes(d.topic)) {
+                        this.subscribedTopics.push(d.topic);
+                        this.$set(this.topicData, d.topic, null);
+                    }
+                });
+            },
+            disconnect() { if(this.socket) this.socket.disconnect(); },
+            async fetchTopics() { try { let r = await fetch(`${this.robotUrl}/topics`); let d = await r.json(); this.allTopics = d.topics; } catch(e){} },
+
+            addTopic() {
+                if(!this.topicToAdd) return;
+                this.socket.emit('subscribe', { topic: this.topicToAdd });
+                this.topicToAdd = '';
+            },
+            removeTopic(topic) {
+                this.socket.emit('unsubscribe', { topic: topic });
+                this.subscribedTopics = this.subscribedTopics.filter(t => t !== topic);
+                this.$delete(this.topicData, topic);
+                for (let id in this.activePlots) {
+                    if (id.startsWith(topic + '::')) this.$delete(this.activePlots, id);
+                }
+            },
+            toggleTopic(topic) {
+                this.$set(this.topicCollapsed, topic, !this.topicCollapsed[topic]);
+            },
+
+
+            togglePlot(e) {
+                const id = e.topic + '::' + e.path;
+                if (this.activePlots[id]) {
+                    this.$delete(this.activePlots, id);
+                } else {
+                    const map = this.jointMaps[e.topic] || {};
+                    const shortName = map[e.path] ? `${e.path} ${map[e.path]}` : e.path;
+                    const displayName = this.subscribedTopics.length > 1 ? `${e.topic}/${shortName}` : shortName;
+
+                    const usedColors = Object.values(this.activePlots).length;
+                    this.$set(this.activePlots, id, {
+                        color: COLORS[usedColors % COLORS.length],
+                        data: [],
+                        name: displayName
+                    });
+                }
+            },
+            removePlot(id) { this.$delete(this.activePlots, id); },
+            clearAll() { this.activePlots = {}; this.chart.setOption({ series: [] }, { replaceMerge: ['series'] }); },
+
+            renderLoop() {
+                if (!this.chart || this.isPaused) return;
+                const series = [];
+                for (let id in this.activePlots) {
+                    const cfg = this.activePlots[id];
+                    series.push({
+                        name: cfg.name,
+                        type: 'line',
+                        showSymbol: false,
+                        connectNulls: false,
+                        data: cfg.data,
+                        itemStyle: { color: cfg.color },
+                        lineStyle: { width: 2 },
+                        animation: false
+                    });
+                }
+                this.chart.setOption({ series: series }, { replaceMerge: ['series'] });
+            },
+
+            getJointMap(topic) { return this.jointMaps[topic] || {}; },
+            getValueByPath(obj, path) { return path.split('.').reduce((o, k) => (o || {})[k], obj); },
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                if (!this.isPaused) this.chart.dispatchAction({ type: 'restore' });
+            },
+            activateBoxZoom() {
+                this.chart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: true });
+            },
+            dispatchChartAction(type) { this.chart.dispatchAction({ type: type }); },
+            updateTooltip() {
+                if (!this.chart) return;
+                this.chart.setOption({
+                    tooltip: { show: this.isShiftDown },
+                    axisPointer: { show: this.isShiftDown }
+                });
+            },
+
+            initChart() {
+                this.chart = echarts.init(document.getElementById('chart'));
+                this.chart.setOption({
+                    title: { show: false },
+                    tooltip: {
+                        show: false, trigger: 'axis', axisPointer: { type: 'cross' },
+                        formatter: params => {
+                            let res = new Date(params[0].axisValue).toLocaleTimeString() + '<br/>';
+                            params.forEach(item => {
+                                if (item.value[1] !== null) res += item.marker + item.seriesName + ': ' + item.value[1].toFixed(4) + '<br/>';
+                            });
+                            return res;
+                        }
+                    },
+                    toolbox: { show: false },
+                    grid: { left: 50, right: 30, top: 50, bottom: 30, containLabel: true },
+                    dataZoom: [ { type: 'inside', xAxisIndex: 0 }, { type: 'inside', yAxisIndex: 0 } ],
+                    xAxis: { type: 'time', splitLine: { show: false }, axisLabel: { color: '#888' } },
+                    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#333' } }, axisLabel: { color: '#888' }, scale: true },
+                    series: []
+                });
+            }
+        }
+    });
+</script>
+</body>
+</html>
