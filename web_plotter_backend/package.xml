@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>web_plotter_backend</name>
-  <version>0.0.1</version>
-  <description>The web_plotter_backend package for visualizing ROS topics via WebSocket</description>
+  <version>1.0</version>
+  <description>The web_plotter_backend package for visualizing ROS topics</description>
 
-  <maintainer email="student@todo.todo">Student</maintainer>
+  <maintainer email="2874257768@qq.com">Aoalas</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>catkin</buildtool_depend>

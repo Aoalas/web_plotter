@@ -14,4 +14,4 @@
 
 github URL：https://github.com/DFKI-NI/rospy_message_converter
 
-具体的部署过程和使用教程详见docs文件夹。
+具体的部署过程和使用教程详见docs文件夹, 有两份md和一份pdf (从md文档转换过来的)
